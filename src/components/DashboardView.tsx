@@ -20,7 +20,12 @@ import { TasksSection } from './TasksSection';
 interface DashboardViewProps {
   onOpenNewTaskModal: () => void;
   onEditTask: (task: Task) => void;
-  onOpenNewScheduleModal: (dayOfWeek?: number, dateStr?: string) => void;
+  onOpenNewScheduleModal: (
+    dayOfWeek?: number,
+    dateStr?: string,
+    period?: number,
+    timetableType?: 'school' | 'tutoring'
+  ) => void;
   onEditScheduleItem: (item: ScheduleItem) => void;
   onOpenNewHabitModal: () => void;
   onEditHabit: (habit: Habit) => void;
@@ -149,7 +154,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         - Add lesson action
       */}
       <WeeklyScheduleSection
-        onOpenNewLesson={(dayOfWeek, dateStr) => onOpenNewScheduleModal(dayOfWeek, dateStr)}
+        onOpenNewLesson={(dayOfWeek, dateStr, period, timetableType) =>
+          onOpenNewScheduleModal(dayOfWeek, dateStr, period, timetableType)
+        }
         onEditLesson={(item) => onEditScheduleItem(item)}
       />
 

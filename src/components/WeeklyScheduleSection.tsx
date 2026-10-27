@@ -7,12 +7,14 @@ import {
   Clock,
   MapPin,
   Users,
-  Repeat,
-  Sparkles,
   Edit2,
   Trash2,
   Calendar,
   Layers,
+  GraduationCap,
+  Moon,
+  Table as TableIcon,
+  LayoutGrid,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -22,90 +24,56 @@ import {
   toIsoDate,
   WeekDayInfo,
 } from '../utils/kazakh-date';
+import {
+  SCHOOL_PERIODS,
+  TUTORING_PERIODS,
+  inferPeriodFromTime,
+} from '../utils/timetable-data';
 import { ScheduleItem } from '../types';
 
 interface WeeklyScheduleSectionProps {
-  onOpenNewLesson: (dayOfWeek?: number, dateStr?: string) => void;
+  onOpenNewLesson: (
+    dayOfWeek?: number,
+    dateStr?: string,
+    period?: number,
+    timetableType?: 'school' | 'tutoring'
+  ) => void;
   onEditLesson: (item: ScheduleItem) => void;
 }
-
-const CATEGORY_MAP: Record<
-  string,
-  { label: string; bg: string; text: string; border: string; dot: string }
-> = {
-  lecture: {
-    label: 'Дәріс',
-    bg: 'bg-sky-500/15',
-    text: 'text-sky-300',
-    border: 'border-sky-500/30',
-    dot: 'bg-sky-400',
-  },
-  seminar: {
-    label: 'Семинар',
-    bg: 'bg-amber-500/15',
-    text: 'text-amber-300',
-    border: 'border-amber-500/30',
-    dot: 'bg-amber-400',
-  },
-  practice: {
-    label: 'Практика',
-    bg: 'bg-[var(--color-accent-primary)]/15',
-    text: 'text-[var(--color-accent-primary)]',
-    border: 'border-[var(--color-accent-primary)]/30',
-    dot: 'bg-[var(--color-accent-primary)]',
-  },
-  lab: {
-    label: 'Зертхана',
-    bg: 'bg-emerald-500/15',
-    text: 'text-emerald-300',
-    border: 'border-emerald-500/30',
-    dot: 'bg-emerald-400',
-  },
-  tutoring: {
-    label: 'Жеке сабақ',
-    bg: 'bg-purple-500/15',
-    text: 'text-purple-300',
-    border: 'border-purple-500/30',
-    dot: 'bg-purple-400',
-  },
-  work: {
-    label: 'Мәжіліс/Жұмыс',
-    bg: 'bg-slate-500/15',
-    text: 'text-slate-300',
-    border: 'border-slate-500/30',
-    dot: 'bg-slate-400',
-  },
-  other: {
-    label: 'Басқа',
-    bg: 'bg-slate-500/15',
-    text: 'text-slate-300',
-    border: 'border-slate-500/30',
-    dot: 'bg-slate-400',
-  },
-};
 
 export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
   onOpenNewLesson,
   onEditLesson,
 }) => {
-  const { schedule, deleteScheduleItem, toggleScheduleItem } = useApp();
+  const { schedule, deleteScheduleItem } = useApp();
+
+  // Active timetable mode: 'school' (Mon-Fri, periods 0-8 + breaks) vs 'tutoring' (Mon-Sun, periods 1-5)
+  const [activeTimetableType, setActiveTimetableType] = useState<'school' | 'tutoring'>('school');
+
+  // Display mode: 'spreadsheet' (reference HTML table with rowSpan) vs 'cards' (day cards)
+  const [viewMode, setViewMode] = useState<'spreadsheet' | 'cards'>('spreadsheet');
 
   // Anchor date for weekly navigation
   const [weekAnchorDate, setWeekAnchorDate] = useState<Date>(() => new Date());
 
-  // Mobile focused day (defaults to today's day of week: 1..7)
+  // Mobile focused day for card view
   const [mobileSelectedDayOfWeek, setMobileSelectedDayOfWeek] = useState<number>(() => {
     const jsDay = new Date().getDay();
     return jsDay === 0 ? 7 : jsDay;
   });
 
-  // Mobile layout mode: 'all-scroll' (horizontal scroll grid) vs 'tabbed' (quick day tab preview)
-  const [mobileViewMode, setMobileViewMode] = useState<'grid' | 'tabs'>('grid');
-
   // Compute 7 days for the active week
   const weekDays = useMemo(() => {
     return getWeekDays(weekAnchorDate);
   }, [weekAnchorDate]);
+
+  // Days to display in table: School shows Mon–Fri (5 days); Tutoring shows Mon–Sun (7 days)
+  const displayDays = useMemo(() => {
+    if (activeTimetableType === 'school') {
+      return weekDays.slice(0, 5); // Monday through Friday
+    }
+    return weekDays; // Monday through Sunday
+  }, [weekDays, activeTimetableType]);
 
   // Is viewing the real current week?
   const isCurrentWeek = useMemo(() => {
@@ -140,17 +108,26 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
     setMobileSelectedDayOfWeek(jsDay === 0 ? 7 : jsDay);
   };
 
-  // Group lessons for each day of the week
+  // Group lessons for each day of the week, filtered by timetableType
   const lessonsByDay = useMemo(() => {
     const map = new Map<number, { dayInfo: WeekDayInfo; lessons: ScheduleItem[] }>();
-    weekDays.forEach((dayInfo) => {
-      const lessons = getScheduleItemsForDay(schedule, dayInfo.date);
-      map.set(dayInfo.dayOfWeek, { dayInfo, lessons });
-    });
-    return map;
-  }, [weekDays, schedule]);
 
-  // Total lessons in the week
+    weekDays.forEach((dayInfo) => {
+      const allDayLessons = getScheduleItemsForDay(schedule, dayInfo.date);
+      const filtered = allDayLessons.filter((item) => {
+        if (activeTimetableType === 'tutoring') {
+          return item.timetableType === 'tutoring' || item.category === 'tutoring';
+        }
+        return item.timetableType !== 'tutoring' && item.category !== 'tutoring';
+      });
+
+      map.set(dayInfo.dayOfWeek, { dayInfo, lessons: filtered });
+    });
+
+    return map;
+  }, [weekDays, schedule, activeTimetableType]);
+
+  // Total lessons in current timetable view for the week
   const totalWeekLessons = useMemo(() => {
     let count = 0;
     lessonsByDay.forEach(({ lessons }) => {
@@ -159,40 +136,43 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
     return count;
   }, [lessonsByDay]);
 
+  // Active periods list based on timetable type
+  const activePeriods = activeTimetableType === 'school' ? SCHOOL_PERIODS : TUTORING_PERIODS;
+
   return (
     <section className="space-y-3.5">
-      {/* 1. Section Header & Week Controls */}
+      {/* 1. Header & Controls */}
       <div
-        className="rounded-2xl p-4 sm:p-5 border space-y-3 backdrop-blur-md transition-all"
+        className="rounded-2xl p-4 sm:p-5 border space-y-3.5 backdrop-blur-md transition-all shadow-sm"
         style={{
           backgroundColor: 'var(--glass-bg)',
           borderColor: 'var(--color-border)',
         }}
       >
+        {/* Top title and action */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Title and stats */}
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
                 className="w-2.5 h-2.5 rounded-full"
                 style={{ backgroundColor: 'var(--color-accent-primary)' }}
               />
               <h2 className="text-base sm:text-lg font-bold tracking-tight text-[var(--color-text-primary)] uppercase">
-                1. Апталық сабақ кестесі
+                1. Апталық сабақ кестесі (Weekly Timetable)
               </h2>
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--color-sec-bg)] text-[var(--color-accent-primary)] border border-[var(--color-border)]">
                 {totalWeekLessons} сабақ
               </span>
             </div>
-            <p className="text-xs text-[var(--color-accent-secondary)] mt-0.5 font-medium">
-              Аптаның барлық күндері (Дүйсенбі — Жексенбі) толық кестесі
+            <p className="text-xs text-[var(--color-accent-secondary)] font-medium">
+              Қос сабақтар тігінен бір ұяшыққа біріктірілген (2-period merged cells)
             </p>
           </div>
 
-          {/* Action button */}
+          {/* New Lesson button */}
           <button
-            onClick={() => onOpenNewLesson(mobileSelectedDayOfWeek)}
-            className="flex items-center justify-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl text-[#101923] transition-all active:scale-95 shadow-sm shrink-0 self-start sm:self-auto"
+            onClick={() => onOpenNewLesson(undefined, undefined, undefined, activeTimetableType)}
+            className="flex items-center justify-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl text-[#101923] transition-all active:scale-95 shadow-sm shrink-0 self-start sm:self-auto cursor-pointer"
             style={{ backgroundColor: 'var(--color-accent-primary)' }}
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -200,8 +180,66 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
           </button>
         </div>
 
+        {/* Timetable Mode Switcher Pills */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[var(--color-border-subtle)]">
+          <div className="flex items-center p-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-sec-bg)] gap-1">
+            <button
+              onClick={() => setActiveTimetableType('school')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTimetableType === 'school'
+                  ? 'bg-[var(--color-accent-primary)] text-[#101923] shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Мектеп кестесі (Дүй–Жұм)</span>
+            </button>
+            <button
+              onClick={() => setActiveTimetableType('tutoring')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTimetableType === 'tutoring'
+                  ? 'bg-[var(--color-accent-primary)] text-[#101923] shadow-xs'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5" />
+              <span>Кешкі репетиторлық (Дүй–Жек)</span>
+            </button>
+          </div>
+
+          {/* View toggle (Spreadsheet vs Cards) */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center p-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-sec-bg)] gap-1">
+              <button
+                onClick={() => setViewMode('spreadsheet')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                  viewMode === 'spreadsheet'
+                    ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)] font-bold shadow-xs'
+                    : 'text-[var(--color-text-secondary)]'
+                }`}
+                title="Spreadsheet кесте көрінісі"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Кесте парағы</span>
+              </button>
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                  viewMode === 'cards'
+                    ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)] font-bold shadow-xs'
+                    : 'text-[var(--color-text-secondary)]'
+                }`}
+                title="Күндер бойынша карточкалар"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Күндер бойынша</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Week navigation bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
           <div className="flex items-center gap-1.5">
             <button
               onClick={goToPreviousWeek}
@@ -226,107 +264,283 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {!isCurrentWeek && (
-              <button
-                onClick={goToCurrentWeek}
-                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-[var(--color-accent-primary)] text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 hover:bg-[var(--color-accent-primary)]/20 transition-all active:scale-95"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Осы аптаға оралу</span>
-              </button>
-            )}
+          {!isCurrentWeek && (
+            <button
+              onClick={goToCurrentWeek}
+              className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-[var(--color-accent-primary)] text-[var(--color-accent-primary)] bg-[var(--color-accent-primary)]/10 hover:bg-[var(--color-accent-primary)]/20 transition-all active:scale-95"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Осы аптаға оралу</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-            {/* Mobile View Toggle */}
-            <div className="sm:hidden flex items-center p-0.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-sec-bg)] text-[11px]">
-              <button
-                onClick={() => setMobileViewMode('grid')}
-                className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
-                  mobileViewMode === 'grid'
-                    ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)] font-bold shadow-xs'
-                    : 'text-[var(--color-text-secondary)]'
-                }`}
-              >
-                Барлық апта
-              </button>
-              <button
-                onClick={() => setMobileViewMode('tabs')}
-                className={`px-2 py-0.5 rounded-md font-medium transition-colors ${
-                  mobileViewMode === 'tabs'
-                    ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)] font-bold shadow-xs'
-                    : 'text-[var(--color-text-secondary)]'
-                }`}
-              >
-                Күндер бойынша
-              </button>
-            </div>
+      {/* 2. MAIN SPREADSHEET TIMETABLE VIEW (with vertical rowSpan cell merging) */}
+      {viewMode === 'spreadsheet' ? (
+        <div className="space-y-2">
+          {/* Mobile horizontal scroll hint */}
+          <div className="sm:hidden text-center text-[10px] text-[var(--color-text-muted)] flex items-center justify-center gap-1">
+            <span>← Кестені толық көру үшін оңға/солға сырғытыңыз →</span>
+          </div>
+
+          {/* Spreadsheet Table Container */}
+          <div className="overflow-x-auto rounded-xl border border-[#7C9E89] shadow-md bg-white">
+            <table className="w-full border-collapse text-center min-w-[760px]">
+              {/* Header: Sage Green with centered bold day names */}
+              <thead>
+                <tr className="bg-[#D6E4CF]">
+                  {/* Narrow first column for period & time */}
+                  <th className="border border-[#8BAA96] py-3 px-2 text-[11px] font-extrabold uppercase tracking-wider text-[#14281D] w-[110px] min-w-[110px] bg-[#D4E2CD] select-none">
+                    Сабақ / Уақыт
+                  </th>
+
+                  {/* Days */}
+                  {displayDays.map((day) => (
+                    <th
+                      key={day.isoDate}
+                      className={`border border-[#8BAA96] py-3 px-2 text-center transition-colors ${
+                        day.isToday ? 'bg-[#C2D8BA]' : 'bg-[#D6E4CF]'
+                      }`}
+                    >
+                      <div className="text-xs sm:text-sm font-extrabold text-[#11261B] uppercase tracking-wide">
+                        {day.dayName}
+                      </div>
+                      <div className="text-[10px] font-semibold text-[#2D5239] mt-0.5">
+                        {day.dayNumber}{' '}
+                        {day.date.toLocaleString('kk', { month: 'short' })}
+                        {day.isToday && (
+                          <span className="ml-1.5 px-1.5 py-0.2 rounded bg-[#11261B] text-[#D6E4CF] text-[9px] font-bold">
+                            БҮГІН
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+
+              {/* Body: Periods with vertical rowSpan merge algorithm */}
+              <tbody>
+                {(() => {
+                  // Active rowSpan tracking map: dayOfWeek -> remaining rows to skip
+                  const skipCounts = new Map<number, number>();
+
+                  return activePeriods.map((periodItem, pIndex) => {
+                    // Full-width break row
+                    if (periodItem.isBreak) {
+                      return (
+                        <tr
+                          key={`break-${pIndex}`}
+                          className="bg-[#DEE9D7] text-[#24422D]"
+                        >
+                          <td
+                            colSpan={displayDays.length + 1}
+                            className="py-1.5 px-3 text-center font-bold text-[11px] tracking-wider border border-[#8BAA96] bg-[#DEE9D7] text-[#24422D] select-none uppercase"
+                          >
+                            — {periodItem.label} —
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    // Regular teaching period row
+                    const currentPeriodNum = periodItem.period;
+
+                    return (
+                      <tr
+                        key={`period-${currentPeriodNum}`}
+                        className="hover:bg-[#F9FCF8] transition-colors"
+                      >
+                        {/* Narrow first column: Period number and time */}
+                        <td className="border border-[#8BAA96] bg-[#EDF3EA] py-2.5 px-1.5 text-center select-none w-[110px] min-w-[110px] align-middle">
+                          <div className="font-extrabold text-sm text-[#14281D] leading-none">
+                            {currentPeriodNum}
+                          </div>
+                          <div className="text-[10px] font-mono text-[#3D5B46] mt-1 leading-none font-semibold">
+                            {periodItem.timeRange}
+                          </div>
+                        </td>
+
+                        {/* Day cells with HTML rowSpan for merged consecutive lessons */}
+                        {displayDays.map((day) => {
+                          const remainingSkip = skipCounts.get(day.dayOfWeek) || 0;
+
+                          // If this cell is covered by a vertical rowSpan from a previous period, omit <td>!
+                          if (remainingSkip > 0) {
+                            skipCounts.set(day.dayOfWeek, remainingSkip - 1);
+                            return null;
+                          }
+
+                          // Find lesson for this day that starts at currentPeriodNum
+                          const dayLessons = lessonsByDay.get(day.dayOfWeek)?.lessons || [];
+                          const lesson = dayLessons.find((l) => {
+                            if (typeof l.startPeriod === 'number') {
+                              return l.startPeriod === currentPeriodNum;
+                            }
+                            const inferred = inferPeriodFromTime(
+                              l.startTime,
+                              activeTimetableType === 'tutoring'
+                            );
+                            return inferred.startPeriod === currentPeriodNum;
+                          });
+
+                          if (lesson) {
+                            const startP =
+                              lesson.startPeriod ??
+                              inferPeriodFromTime(
+                                lesson.startTime,
+                                activeTimetableType === 'tutoring'
+                              ).startPeriod;
+                            const endP =
+                              lesson.endPeriod ??
+                              inferPeriodFromTime(
+                                lesson.endTime,
+                                activeTimetableType === 'tutoring'
+                              ).endPeriod;
+                            const span = Math.max(1, endP - startP + 1);
+
+                            // If this lesson spans across consecutive periods (e.g. 1-2, 3-4, 7-8),
+                            // instruct future period rows to skip this day column!
+                            if (span > 1) {
+                              skipCounts.set(day.dayOfWeek, span - 1);
+                            }
+
+                            return (
+                              <td
+                                key={day.isoDate}
+                                rowSpan={span}
+                                onClick={() => onEditLesson(lesson)}
+                                className="border border-[#8BAA96] bg-white p-2.5 text-center align-middle hover:bg-[#F2F7F0] transition-colors cursor-pointer group relative shadow-2xs"
+                              >
+                                <div className="flex flex-col items-center justify-center h-full min-h-[52px] space-y-0.5">
+                                  {/* Lesson Name / Subject */}
+                                  <div className="font-extrabold text-xs sm:text-sm text-[#112317] group-hover:text-[#1F4E30] leading-tight">
+                                    {lesson.title}
+                                  </div>
+
+                                  {/* Class / Group */}
+                                  {lesson.groupName && (
+                                    <div className="text-xs font-bold text-[#2A4D36] leading-tight mt-0.5">
+                                      {lesson.groupName}
+                                    </div>
+                                  )}
+
+                                  {/* Classroom / Room */}
+                                  {lesson.room && (
+                                    <div className="text-[11px] font-medium text-[#4B6B57] leading-tight">
+                                      {lesson.room}
+                                    </div>
+                                  )}
+
+                                  {/* Merged badge indicator */}
+                                  {span > 1 && (
+                                    <div className="mt-1">
+                                      <span className="text-[9px] font-bold text-[#20472D] bg-[#E2EEDC] px-2 py-0.5 rounded-full border border-[#8BAA96]/80 inline-block shadow-2xs">
+                                        {startP}–{endP} қос сабақ
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Floating hover action buttons */}
+                                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white rounded border border-[#8BAA96] shadow-xs p-0.5 z-10">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onEditLesson(lesson);
+                                    }}
+                                    title="Өңдеу"
+                                    className="p-1 hover:text-[#1F4E30] text-[#4B6B57] transition-colors"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteScheduleItem(lesson.id);
+                                    }}
+                                    title="Өшіру"
+                                    className="p-1 hover:text-rose-600 text-rose-400 transition-colors"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          // Empty cell: allows adding a lesson for this day and period
+                          return (
+                            <td
+                              key={day.isoDate}
+                              rowSpan={1}
+                              onClick={() =>
+                                onOpenNewLesson(
+                                  day.dayOfWeek,
+                                  day.isoDate,
+                                  currentPeriodNum,
+                                  activeTimetableType
+                                )
+                              }
+                              className="border border-[#8BAA96] bg-white p-1 text-center align-middle hover:bg-[#F2F7F0] transition-colors cursor-pointer group"
+                              title={`${day.dayName}, ${currentPeriodNum}-сабаққа қосу`}
+                            >
+                              <div className="w-full h-full min-h-[44px] flex items-center justify-center opacity-0 group-hover:opacity-100 text-[#507A5F] transition-opacity">
+                                <Plus className="w-4 h-4 stroke-[2]" />
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
           </div>
         </div>
+      ) : (
+        /* 3. CARDS VIEW (Day by Day view) */
+        <div className="space-y-3">
+          {/* Quick day buttons */}
+          <div className="grid grid-cols-7 gap-1">
+            {weekDays.map((day) => {
+              const entry = lessonsByDay.get(day.dayOfWeek);
+              const count = entry?.lessons.length || 0;
+              const isSelected = mobileSelectedDayOfWeek === day.dayOfWeek;
 
-        {/* Legend for Categories */}
-        <div className="flex items-center gap-2 flex-wrap pt-1 text-[10px]">
-          <span className="text-[var(--color-text-muted)] font-medium">Белгілер:</span>
-          {Object.entries(CATEGORY_MAP).slice(0, 5).map(([key, style]) => (
-            <span
-              key={key}
-              className={`px-2 py-0.5 rounded-md border flex items-center gap-1 font-medium ${style.bg} ${style.text} ${style.border}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-              {style.label}
-            </span>
-          ))}
-        </div>
-      </div>
+              return (
+                <button
+                  key={day.isoDate}
+                  onClick={() => setMobileSelectedDayOfWeek(day.dayOfWeek)}
+                  className={`py-2 px-1 rounded-xl border flex flex-col items-center justify-center transition-all ${
+                    isSelected
+                      ? 'bg-[var(--color-accent-primary)] text-[#101923] border-[var(--color-accent-primary)] font-bold shadow-sm'
+                      : day.isToday
+                      ? 'border-[var(--color-accent-primary)] bg-[var(--color-sec-bg)] text-[var(--color-accent-primary)] font-semibold'
+                      : 'border-[var(--color-border)] bg-[var(--color-sec-bg)]/80 text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  <span className="text-[10px] uppercase tracking-wider">{day.dayShort}</span>
+                  <span className="text-xs font-bold leading-none mt-0.5">{day.dayNumber}</span>
+                  <span
+                    className={`text-[9px] mt-1 px-1 rounded-full ${
+                      isSelected
+                        ? 'bg-black/20 text-[#101923]'
+                        : count > 0
+                        ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)]'
+                        : 'text-[var(--color-text-muted)]'
+                    }`}
+                  >
+                    {count > 0 ? count : '—'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-      {/* 2. Responsive Weekly Schedule View */}
-
-      {/* A. 7-Day Quick Pill Selector (Visible on Mobile for fast navigation & overview) */}
-      <div className="sm:hidden grid grid-cols-7 gap-1">
-        {weekDays.map((day) => {
-          const entry = lessonsByDay.get(day.dayOfWeek);
-          const count = entry?.lessons.length || 0;
-          const isSelected = mobileSelectedDayOfWeek === day.dayOfWeek;
-
-          return (
-            <button
-              key={day.isoDate}
-              onClick={() => {
-                setMobileSelectedDayOfWeek(day.dayOfWeek);
-                if (mobileViewMode === 'grid') {
-                  const el = document.getElementById(`day-col-${day.dayOfWeek}`);
-                  el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
-                }
-              }}
-              className={`py-2 px-1 rounded-xl border flex flex-col items-center justify-center transition-all touch-manipulation active:scale-95 ${
-                isSelected
-                  ? 'bg-[var(--color-accent-primary)] text-[#101923] border-[var(--color-accent-primary)] font-bold shadow-sm'
-                  : day.isToday
-                  ? 'border-[var(--color-accent-primary)] bg-[var(--color-sec-bg)] text-[var(--color-accent-primary)] font-semibold'
-                  : 'border-[var(--color-border)] bg-[var(--color-sec-bg)]/80 text-[var(--color-text-secondary)]'
-              }`}
-            >
-              <span className="text-[10px] uppercase tracking-wider">{day.dayShort}</span>
-              <span className="text-xs font-bold leading-none mt-0.5">{day.dayNumber}</span>
-              <span
-                className={`text-[9px] mt-1 px-1 rounded-full ${
-                  isSelected
-                    ? 'bg-black/20 text-[#101923]'
-                    : count > 0
-                    ? 'bg-[var(--color-card-bg)] text-[var(--color-accent-primary)]'
-                    : 'text-[var(--color-text-muted)]'
-                }`}
-              >
-                {count > 0 ? count : '—'}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* B. The 7 Columns Calendar (Desktop: 7 col grid | Mobile: horizontally scrollable or tabbed) */}
-      {mobileViewMode === 'tabs' ? (
-        /* Mobile Focused Tab View */
-        <div className="sm:hidden space-y-3">
+          {/* Cards for selected day */}
           {(() => {
             const entry = lessonsByDay.get(mobileSelectedDayOfWeek);
             if (!entry) return null;
@@ -343,7 +557,8 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
                 <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border-subtle)] mb-3">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-[var(--color-text-primary)]">
-                      {dayInfo.dayName}, {dayInfo.dayNumber} {dayInfo.date.toLocaleString('kk', { month: 'long' })}
+                      {dayInfo.dayName}, {dayInfo.dayNumber}{' '}
+                      {dayInfo.date.toLocaleString('kk', { month: 'long' })}
                     </span>
                     {dayInfo.isToday && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--color-accent-primary)] text-[#101923]">
@@ -352,7 +567,14 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
                     )}
                   </div>
                   <button
-                    onClick={() => onOpenNewLesson(dayInfo.dayOfWeek, dayInfo.isoDate)}
+                    onClick={() =>
+                      onOpenNewLesson(
+                        dayInfo.dayOfWeek,
+                        dayInfo.isoDate,
+                        undefined,
+                        activeTimetableType
+                      )
+                    }
                     className="text-xs font-semibold text-[var(--color-accent-primary)] hover:underline flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" /> Сабақ қосу
@@ -365,32 +587,42 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
                       Бұл күні сабақ жоспарланбаған
                     </p>
                     <button
-                      onClick={() => onOpenNewLesson(dayInfo.dayOfWeek, dayInfo.isoDate)}
+                      onClick={() =>
+                        onOpenNewLesson(
+                          dayInfo.dayOfWeek,
+                          dayInfo.isoDate,
+                          undefined,
+                          activeTimetableType
+                        )
+                      }
                       className="text-xs font-semibold text-[var(--color-accent-primary)] hover:underline"
                     >
-                      + Жаңа сабақ кестесін қосу
+                      + Жаңа сабақ қосу
                     </button>
                   </div>
                 ) : (
                   <div className="space-y-2.5">
                     {lessons.map((lesson) => {
-                      const catStyle = CATEGORY_MAP[lesson.category] || CATEGORY_MAP.other;
+                      const isMerged =
+                        typeof lesson.startPeriod === 'number' &&
+                        typeof lesson.endPeriod === 'number' &&
+                        lesson.endPeriod > lesson.startPeriod;
 
                       return (
                         <div
                           key={lesson.id}
-                          className="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-sec-bg)] space-y-1.5 transition-all hover:border-[var(--color-accent-primary)]/40"
+                          className="p-3.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-sec-bg)] space-y-2 transition-all hover:border-[var(--color-accent-primary)]/40"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[var(--color-card-bg)] text-[var(--color-text-primary)] border border-[var(--color-border)] flex items-center gap-1">
                               <Clock className="w-3 h-3 text-[var(--color-accent-primary)]" />
                               {lesson.startTime} — {lesson.endTime}
                             </span>
-                            <span
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}
-                            >
-                              {catStyle.label}
-                            </span>
+                            {isMerged && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)] border border-[var(--color-accent-primary)]/30">
+                                {lesson.startPeriod}–{lesson.endPeriod} қос сабақ
+                              </span>
+                            )}
                           </div>
 
                           <h4 className="text-sm font-bold text-[var(--color-text-primary)]">
@@ -440,172 +672,6 @@ export const WeeklyScheduleSection: React.FC<WeeklyScheduleSectionProps> = ({
               </div>
             );
           })()}
-        </div>
-      ) : (
-        /* Full 7-column layout (Desktop: 7 col grid | Mobile: horizontally scrollable 7 columns) */
-        <div className="relative">
-          {/* Mobile scroll hint */}
-          <div className="sm:hidden text-center pb-1 text-[10px] text-[var(--color-text-muted)]">
-            ← Аптаның барлық күндерін көру үшін сырғытыңыз →
-          </div>
-
-          <div className="overflow-x-auto pb-2 scrollbar-thin">
-            <div className="grid grid-cols-7 gap-2.5 min-w-[760px] sm:min-w-0">
-              {weekDays.map((day) => {
-                const entry = lessonsByDay.get(day.dayOfWeek);
-                const lessons = entry?.lessons || [];
-                const hasLessons = lessons.length > 0;
-
-                return (
-                  <div
-                    key={day.isoDate}
-                    id={`day-col-${day.dayOfWeek}`}
-                    className={`rounded-2xl border flex flex-col transition-all duration-200 backdrop-blur-md ${
-                      day.isToday
-                        ? 'border-[var(--color-accent-primary)] ring-1 ring-[var(--color-accent-primary)]/50 shadow-md bg-[var(--color-card-bg)]'
-                        : hasLessons
-                        ? 'border-[var(--color-border)] bg-[var(--glass-bg)] hover:border-[var(--color-accent-primary)]/40'
-                        : 'border-[var(--color-border-subtle)] bg-[var(--color-sec-bg)]/40 opacity-80'
-                    }`}
-                  >
-                    {/* Column Day Header */}
-                    <div
-                      className={`p-2.5 border-b text-center rounded-t-2xl transition-colors ${
-                        day.isToday
-                          ? 'bg-[var(--color-accent-primary)]/15 border-[var(--color-accent-primary)]/40'
-                          : 'border-[var(--color-border-subtle)] bg-[var(--color-sec-bg)]/60'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`text-[11px] font-bold uppercase tracking-wider ${
-                            day.isToday
-                              ? 'text-[var(--color-accent-primary)]'
-                              : 'text-[var(--color-text-secondary)]'
-                          }`}
-                        >
-                          {day.dayShort}
-                        </span>
-
-                        {day.isToday ? (
-                          <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-[var(--color-accent-primary)] text-[#101923]">
-                            БҮГІН
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
-                            {day.dayNumber}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between mt-1 text-[11px]">
-                        <span className="text-[10px] text-[var(--color-text-muted)] truncate">
-                          {day.dayName}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-1.5 rounded-full ${
-                            hasLessons
-                              ? 'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]'
-                              : 'text-[var(--color-text-muted)]'
-                          }`}
-                        >
-                          {lessons.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Lesson Cards inside this day */}
-                    <div className="p-2 space-y-2 flex-1 flex flex-col justify-between min-h-[160px]">
-                      {hasLessons ? (
-                        <div className="space-y-1.5">
-                          {lessons.map((lesson) => {
-                            const catStyle = CATEGORY_MAP[lesson.category] || CATEGORY_MAP.other;
-
-                            return (
-                              <div
-                                key={lesson.id}
-                                className="group relative rounded-xl p-2 border border-[var(--color-border)] bg-[var(--color-sec-bg)]/90 hover:border-[var(--color-accent-primary)]/50 transition-all text-left shadow-xs"
-                              >
-                                {/* Time & Category */}
-                                <div className="flex items-center justify-between gap-1 mb-1">
-                                  <span className="font-mono text-[10px] font-bold text-[var(--color-text-primary)]">
-                                    {lesson.startTime}
-                                  </span>
-                                  <span
-                                    className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}
-                                    title={catStyle.label}
-                                  >
-                                    {catStyle.label}
-                                  </span>
-                                </div>
-
-                                {/* Title */}
-                                <h4
-                                  className="text-xs font-bold text-[var(--color-text-primary)] line-clamp-2 leading-tight cursor-pointer hover:text-[var(--color-accent-primary)]"
-                                  onClick={() => onEditLesson(lesson)}
-                                  title={lesson.title}
-                                >
-                                  {lesson.title}
-                                </h4>
-
-                                {/* Room or Group */}
-                                {(lesson.room || lesson.groupName) && (
-                                  <div className="mt-1 pt-1 border-t border-[var(--color-border-subtle)] flex items-center justify-between gap-1 text-[10px] text-[var(--color-text-muted)]">
-                                    {lesson.room && (
-                                      <span className="truncate flex items-center gap-0.5">
-                                        <MapPin className="w-2.5 h-2.5 text-[var(--color-accent-primary)] shrink-0" />
-                                        {lesson.room}
-                                      </span>
-                                    )}
-                                    {lesson.groupName && (
-                                      <span className="truncate text-right font-medium text-[var(--color-text-secondary)]">
-                                        {lesson.groupName}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-
-                                {/* Hover actions */}
-                                <div className="absolute top-1 right-1 hidden group-hover:flex items-center gap-0.5 bg-[var(--color-card-bg)]/95 p-0.5 rounded-md border border-[var(--color-border)] shadow-sm">
-                                  <button
-                                    onClick={() => onEditLesson(lesson)}
-                                    className="p-1 hover:text-[var(--color-accent-primary)] text-[var(--color-text-muted)] transition-colors"
-                                    title="Өңдеу"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => deleteScheduleItem(lesson.id)}
-                                    className="p-1 hover:text-rose-400 text-[var(--color-text-muted)] transition-colors"
-                                    title="Өшіру"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="py-6 text-center text-[10px] text-[var(--color-text-muted)] flex flex-col items-center justify-center flex-1">
-                          <span>Сабақ жоқ</span>
-                        </div>
-                      )}
-
-                      {/* Add quick lesson button for this day */}
-                      <button
-                        onClick={() => onOpenNewLesson(day.dayOfWeek, day.isoDate)}
-                        className="w-full py-1 rounded-lg text-[10px] font-medium border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] transition-all flex items-center justify-center gap-1 active:scale-95 mt-1"
-                        title={`${day.dayName} күніне сабақ қосу`}
-                      >
-                        <Plus className="w-3 h-3" /> Сабақ
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         </div>
       )}
     </section>

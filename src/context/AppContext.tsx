@@ -15,6 +15,7 @@ import {
   getCustomBackgroundFromIDB,
   deleteCustomBackgroundFromIDB,
 } from '../utils/idb-storage';
+import { inferPeriodFromTime } from '../utils/timetable-data';
 import { getPresetById } from '../utils/background-presets';
 
 export type ActiveTab = 'dashboard' | 'schedule' | 'tasks' | 'habits' | 'settings';
@@ -131,7 +132,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) {
         const parsed: ScheduleItem[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Backward-compatible migration: ensure dayOfWeek and recurringWeekly are populated
+          // Backward-compatible migration: ensure dayOfWeek, timetableType, and periods are populated
           const migrated = parsed.map((item) => {
             let dayOfWeek = item.dayOfWeek;
             if (typeof dayOfWeek !== 'number' && item.date) {
@@ -139,17 +140,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const jsDay = d.getDay();
               dayOfWeek = jsDay === 0 ? 7 : jsDay;
             }
+            const timetableType = item.timetableType || (item.category === 'tutoring' ? 'tutoring' : 'school');
+            let startPeriod = item.startPeriod;
+            let endPeriod = item.endPeriod;
+            if (typeof startPeriod !== 'number') {
+              const inferred = inferPeriodFromTime(item.startTime, timetableType === 'tutoring');
+              startPeriod = inferred.startPeriod;
+              endPeriod = typeof endPeriod === 'number' ? endPeriod : inferred.endPeriod;
+            }
             return {
               ...item,
               dayOfWeek: dayOfWeek ?? 1,
               recurringWeekly: item.recurringWeekly ?? true,
+              timetableType,
+              startPeriod,
+              endPeriod: endPeriod ?? startPeriod,
             };
           });
 
-          // If previously there were only Monday items (e.g. fewer than 8 items on 1 day),
-          // complement with weekly lessons so all 7 days of the teaching schedule are populated
-          const hasMultipleWeekdays = migrated.some((i) => i.dayOfWeek && i.dayOfWeek > 1);
-          if (!hasMultipleWeekdays) {
+          // Ensure school merged lessons (like school-mon-3-4) are present
+          const hasSchoolMerged = migrated.some(
+            (i) => i.id === 'school-mon-3-4' || (i.startPeriod === 3 && i.endPeriod === 4)
+          );
+          if (!hasSchoolMerged) {
             const demo = getInitialDemoData().schedule;
             const existingIds = new Set(migrated.map((m) => m.id));
             const newDemo = demo.filter((d) => !existingIds.has(d.id));

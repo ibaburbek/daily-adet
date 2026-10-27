@@ -36,10 +36,13 @@ export interface ScheduleItem {
   category: string;
   notes?: string;
   completed?: boolean;
-  dayOfWeek?: number; // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 0=Sun
+  dayOfWeek?: number; // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 0=Sun (or 7)
   recurringWeekly?: boolean;
   room?: string; // Classroom or online link
   groupName?: string; // Group / Class name
+  startPeriod?: number; // Period number (0, 1, 2, 3...)
+  endPeriod?: number; // For merged multi-period lessons, e.g. 4
+  timetableType?: 'school' | 'tutoring';
 }
 
 export type ThemeMode = 'dark' | 'light' | 'system';

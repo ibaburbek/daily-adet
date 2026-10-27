@@ -32,7 +32,12 @@ const MainLayout: React.FC = () => {
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [scheduleToEdit, setScheduleToEdit] = useState<ScheduleItem | null>(null);
-  const [schedulePrefill, setSchedulePrefill] = useState<{ dayOfWeek?: number; dateStr?: string }>({});
+  const [schedulePrefill, setSchedulePrefill] = useState<{
+    dayOfWeek?: number;
+    dateStr?: string;
+    period?: number;
+    timetableType?: 'school' | 'tutoring';
+  }>({});
 
   const [isHabitModalOpen, setIsHabitModalOpen] = useState(false);
   const [habitToEdit, setHabitToEdit] = useState<Habit | null>(null);
@@ -48,9 +53,14 @@ const MainLayout: React.FC = () => {
     setIsTaskModalOpen(true);
   };
 
-  const handleOpenNewSchedule = (dayOfWeek?: number, dateStr?: string) => {
+  const handleOpenNewSchedule = (
+    dayOfWeek?: number,
+    dateStr?: string,
+    period?: number,
+    timetableType?: 'school' | 'tutoring'
+  ) => {
     setScheduleToEdit(null);
-    setSchedulePrefill({ dayOfWeek, dateStr });
+    setSchedulePrefill({ dayOfWeek, dateStr, period, timetableType });
     setIsScheduleModalOpen(true);
   };
 
@@ -162,6 +172,8 @@ const MainLayout: React.FC = () => {
         scheduleToEdit={scheduleToEdit}
         prefillDayOfWeek={schedulePrefill.dayOfWeek}
         prefillDate={schedulePrefill.dateStr}
+        prefillPeriod={schedulePrefill.period}
+        prefillTimetableType={schedulePrefill.timetableType}
       />
 
       <HabitModal
